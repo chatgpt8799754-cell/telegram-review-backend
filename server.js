@@ -1,41 +1,39 @@
 import express from 'express';
-
 import cors from 'cors';
-
 import axios from 'axios';
-
 import admin from 'firebase-admin';
-
 import fs from 'fs';
 
 const app = express();
 
 app.use(cors());
-
 app.use(express.json());
 
 
-/* =========================================
-   FIREBASE ADMIN
-========================================= */
+
+/* FIREBASE */
 
 const serviceAccount =
 JSON.parse(
-    fs.readFileSync('./firebase-service-account.json')
+fs.readFileSync(
+'./firebase-service-account.json',
+'utf8'
+)
 );
 
 admin.initializeApp({
-
-    credential:
-    admin.credential.cert(serviceAccount)
+credential:
+admin.credential.cert(
+serviceAccount
+)
 });
 
-const db = admin.firestore();
+const db =
+admin.firestore();
 
 
-/* =========================================
-   ENV
-========================================= */
+
+/* ENV */
 
 const BOT_TOKEN =
 process.env.BOT_TOKEN;
@@ -44,355 +42,447 @@ const CHAT_ID =
 process.env.CHAT_ID;
 
 
-/* =========================================
-   SEND REVIEW TO TELEGRAM
-========================================= */
 
-app.post('/send-review', async (req, res) => {
+/* ROOT */
 
-    try {
+app.get('/', (req,res)=>{
 
-        const {
-            reviewId,
-            name,
-            country,
-            review,
-            rating
-        } = req.body;
+res.send(
+'Telegram Review Backend Running'
+);
 
-        const text = `
-
-⭐ NEW REVIEW
-
-👤 Name: ${name}
-
-🌍 Country: ${country}
-
-⭐ Rating: ${rating}/5
-
-💬 Review:
-${review}
-
-🆔 ID:
-${reviewId}
-
-`;
-
-        await axios.post(
-            `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
-            {
-
-                chat_id: CHAT_ID,
-
-                text,
-
-                reply_markup: {
-
-                    inline_keyboard: [
-                        [
-                            {
-                                text: "✅ Approve",
-
-                                callback_data:
-                                `approve_${reviewId}`
-                            },
-
-                            {
-                                text: "❌ Reject",
-
-                                callback_data:
-                                `reject_${reviewId}`
-                            }
-                        ]
-                    ]
-                }
-            }
-        );
-
-        res.json({
-            success: true
-        });
-
-    } catch(err) {
-
-        console.error(err);
-
-        res.status(500).json({
-            error: err.message
-        });
-    }
 });
 
 
-/* =========================================
-   TELEGRAM WEBHOOK
-========================================= */
 
-app.post('/webhook', async (req, res) => {
+/* SEND REVIEW */
 
-    try {
+app.post(
+'/send-review',
+async(req,res)=>{
 
-        const body = req.body;
+try{
 
-        /* =========================================
-           APPROVE / REJECT
-        ========================================= */
+const {
+reviewId,
+name,
+country,
+review,
+rating
+}
+=
+req.body;
 
-        if (body.callback_query) {
+await axios.post(
+`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
+{
 
-            const data =
-            body.callback_query.data;
+chat_id:
+CHAT_ID,
 
-            const [action, reviewId] =
-            data.split('_');
+text:
 
+`⭐ NEW REVIEW
 
-            /* =========================================
-               APPROVE
-            ========================================= */
+👤 ${name}
 
-            if (action === 'approve') {
+🌍 ${country}
 
-                const pendingDoc =
-                await db
-                .collection('pendingReviews')
-                .doc(reviewId)
-                .get();
+⭐ ${rating}/5
 
-                if (!pendingDoc.exists) {
+💬 ${review}
 
-                    await axios.post(
-                        `https://api.telegram.org/bot${BOT_TOKEN}/answerCallbackQuery`,
-                        {
+🆔 ${reviewId}`,
 
-                            callback_query_id:
-                            body.callback_query.id,
+reply_markup:{
 
-                            text:
-                            "Review Not Found"
-                        }
-                    );
+inline_keyboard:[
 
-                    return res.sendStatus(200);
-                }
+[
 
-                const reviewData =
-                pendingDoc.data();
+{
 
+text:
+'✅ Approve',
 
-                /* MOVE TO REVIEWS */
+callback_data:
+`approve_${reviewId}`
 
-                await db
-                .collection('reviews')
-                .doc(reviewId)
-                .set({
+},
 
-                    ...reviewData,
+{
 
-                    approved: true
-                });
+text:
+'❌ Reject',
 
+callback_data:
+`reject_${reviewId}`
 
-                /* DELETE PENDING */
+}
 
-                await db
-                .collection('pendingReviews')
-                .doc(reviewId)
-                .delete();
+]
 
+]
 
-                /* SUCCESS POPUP */
+}
 
-                await axios.post(
-                    `https://api.telegram.org/bot${BOT_TOKEN}/answerCallbackQuery`,
-                    {
+}
+);
 
-                        callback_query_id:
-                        body.callback_query.id,
+res.json({
+success:true
+});
 
-                        text:
-                        "Review Approved ✅"
-                    }
-                );
+}
 
+catch(err){
 
-                /* REMOVE BUTTONS */
+console.log(err);
 
-                await axios.post(
-                    `https://api.telegram.org/bot${BOT_TOKEN}/editMessageReplyMarkup`,
-                    {
+res
+.status(500)
+.json({
+error:
+err.message
+});
 
-                        chat_id:
-                        body.callback_query.message.chat.id,
+}
 
-                        message_id:
-                        body.callback_query.message.message_id,
+}
+);
 
-                        reply_markup: {
-                            inline_keyboard: []
-                        }
-                    }
-                );
 
 
-                /* EDIT MESSAGE */
+/* WEBHOOK */
 
-                await axios.post(
-                    `https://api.telegram.org/bot${BOT_TOKEN}/editMessageText`,
-                    {
+app.post(
+'/webhook',
+async(req,res)=>{
 
-                        chat_id:
-                        body.callback_query.message.chat.id,
+try{
 
-                        message_id:
-                        body.callback_query.message.message_id,
+const body =
+req.body;
 
-                        text:
-                        body.callback_query.message.text +
-                        "\n\n✅ APPROVED"
-                    }
-                );
-            }
 
 
-            /* =========================================
-               REJECT
-            ========================================= */
+/* APPROVE */
 
-            if (action === 'reject') {
+if(
+body.callback_query
+){
 
-                await db
-                .collection('pendingReviews')
-                .doc(reviewId)
-                .delete();
+const data =
+body.callback_query.data;
 
+const [
+action,
+reviewId
+]
+=
+data.split('_');
 
-                /* SUCCESS POPUP */
 
-                await axios.post(
-                    `https://api.telegram.org/bot${BOT_TOKEN}/answerCallbackQuery`,
-                    {
 
-                        callback_query_id:
-                        body.callback_query.id,
+if(
+action==='approve'
+){
 
-                        text:
-                        "Review Rejected ❌"
-                    }
-                );
+const pending =
 
+await db
+.collection(
+'pendingReviews'
+)
+.doc(
+reviewId
+)
+.get();
 
-                /* REMOVE BUTTONS */
 
-                await axios.post(
-                    `https://api.telegram.org/bot${BOT_TOKEN}/editMessageReplyMarkup`,
-                    {
+if(
+!pending.exists
+){
 
-                        chat_id:
-                        body.callback_query.message.chat.id,
+await axios.post(
 
-                        message_id:
-                        body.callback_query.message.message_id,
+`https://api.telegram.org/bot${BOT_TOKEN}/answerCallbackQuery`,
 
-                        reply_markup: {
-                            inline_keyboard: []
-                        }
-                    }
-                );
+{
 
+callback_query_id:
+body.callback_query.id,
 
-                /* EDIT MESSAGE */
+text:
+'Review Not Found'
 
-                await axios.post(
-                    `https://api.telegram.org/bot${BOT_TOKEN}/editMessageText`,
-                    {
+}
 
-                        chat_id:
-                        body.callback_query.message.chat.id,
+);
 
-                        message_id:
-                        body.callback_query.message.message_id,
+return res.sendStatus(
+200
+);
 
-                        text:
-                        body.callback_query.message.text +
-                        "\n\n❌ REJECTED"
-                    }
-                );
-            }
-        }
+}
 
 
-        /* =========================================
-           ADMIN REPLY
-        ========================================= */
+await db
+.collection(
+'reviews'
+)
+.doc(
+reviewId
+)
+.set({
 
-        if (
-            body.message &&
-            body.message.text &&
-            body.message.text.startsWith('/reply')
-        ) {
+...pending.data(),
 
-            const parts =
-            body.message.text.split(' ');
+approved:
+true
 
-            const reviewId =
-            parts[1];
-
-            const reply =
-            parts.slice(2).join(' ');
-
-            await db
-            .collection('reviews')
-            .doc(reviewId)
-            .update({
-                reply
-            });
-
-            await axios.post(
-                `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
-                {
-
-                    chat_id: CHAT_ID,
-
-                    text:
-                    `Reply Added ✅`
-                }
-            );
-        }
-
-        res.sendStatus(200);
-
-    } catch(err) {
-
-        console.error(err);
-
-        res.sendStatus(500);
-    }
 });
 
 
-/* =========================================
-   ROOT
-========================================= */
+await db
+.collection(
+'pendingReviews'
+)
+.doc(
+reviewId
+)
+.delete();
 
-app.get('/', (req, res) => {
 
-    res.send(
-        'Telegram Review Backend Running'
-    );
+
+await axios.post(
+
+`https://api.telegram.org/bot${BOT_TOKEN}/answerCallbackQuery`,
+
+{
+
+callback_query_id:
+body.callback_query.id,
+
+text:
+'Approved ✅'
+
+}
+
+);
+
+
+
+try{
+
+await axios.post(
+
+`https://api.telegram.org/bot${BOT_TOKEN}/editMessageReplyMarkup`,
+
+{
+
+chat_id:
+body.callback_query.message.chat.id,
+
+message_id:
+body.callback_query.message.message_id,
+
+reply_markup:{
+inline_keyboard:[]
+}
+
+}
+
+);
+
+}
+catch(e){
+
+console.log(
+'button remove skip'
+);
+
+}
+
+}
+
+
+
+/* REJECT */
+
+if(
+action==='reject'
+){
+
+await db
+.collection(
+'pendingReviews'
+)
+.doc(
+reviewId
+)
+.delete();
+
+
+
+await axios.post(
+
+`https://api.telegram.org/bot${BOT_TOKEN}/answerCallbackQuery`,
+
+{
+
+callback_query_id:
+body.callback_query.id,
+
+text:
+'Rejected ❌'
+
+}
+
+);
+
+
+
+try{
+
+await axios.post(
+
+`https://api.telegram.org/bot${BOT_TOKEN}/editMessageReplyMarkup`,
+
+{
+
+chat_id:
+body.callback_query.message.chat.id,
+
+message_id:
+body.callback_query.message.message_id,
+
+reply_markup:{
+inline_keyboard:[]
+}
+
+}
+
+);
+
+}
+catch(e){
+
+console.log(
+'reject remove skip'
+);
+
+}
+
+}
+
+}
+
+
+
+/* ADMIN REPLY */
+
+if(
+
+body.message &&
+
+body.message.text &&
+
+body.message.text.startsWith(
+'/reply'
+)
+
+){
+
+const parts =
+
+body.message.text
+.split(' ');
+
+const reviewId =
+parts[1];
+
+const reply =
+
+parts
+.slice(2)
+.join(' ');
+
+
+
+await db
+.collection(
+'reviews'
+)
+.doc(
+reviewId
+)
+.update({
+
+reply
+
 });
 
 
-/* =========================================
-   PORT
-========================================= */
+
+await axios.post(
+
+`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
+
+{
+
+chat_id:
+CHAT_ID,
+
+text:
+'Reply Added ✅'
+
+}
+
+);
+
+}
+
+
+
+res.sendStatus(
+200
+);
+
+}
+
+catch(err){
+
+console.log(
+err
+);
+
+res.sendStatus(
+500
+);
+
+}
+
+}
+);
+
+
+
+/* PORT */
 
 const PORT =
-process.env.PORT || 3000;
 
-app.listen(PORT, () => {
+process.env.PORT
+||
+3000;
 
-    console.log(
-        `Server Running On ${PORT}`
-    );
-});
+app.listen(
+PORT,
+()=>{
+
+console.log(
+`Running ${PORT}`
+);
+
+}
+);
